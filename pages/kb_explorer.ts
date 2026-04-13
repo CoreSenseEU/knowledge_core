@@ -156,7 +156,8 @@ class RosKBClient {
 
 }
 
-const ros_kb_client = new RosKBClient(`ws://${location.hostname}:9090`);
+const rosBridgePort = new URLSearchParams(location.search).get('rosbridge_port') || '9090';
+const ros_kb_client = new RosKBClient(`ws://${location.hostname}:${rosBridgePort}`);
 
 class Node {
     selected: boolean;

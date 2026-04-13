@@ -139,6 +139,11 @@ def main():
         help="port the server listen to.",
     )
     parser.add_argument(
+        "--no-socket",
+        action="store_true",
+        help="disable the socket/IP server (ROS-only mode)",
+    )
+    parser.add_argument(
         "ontology",
         nargs="*",
         help="Files (OWL, RDF or raw triples) with initial ontologies to load",
@@ -169,8 +174,11 @@ def main():
 
     kb = KnowledgeCore(args.ontology, enable_reasoner=args.no_reasoner)
 
-    s = KnowledgeCoreServer(args.port, kb)
-    logger.info("Starting to serve at port %d..." % args.port)
+    if not args.no_socket:
+        s = KnowledgeCoreServer(args.port, kb)
+        logger.info("Starting to serve at port %d..." % args.port)
+    else:
+        logger.info("Socket server disabled (--no-socket)")
 
     if args.no_ros:
         logger.info("Initializing the ROS node...")
@@ -186,9 +194,8 @@ def main():
 
     try:
         while True:
-            asyncore.loop(
-                timeout=0.02, count=1
-            )  # event will be notified at worst 20ms after they are triggered
+            if not args.no_socket:
+                asyncore.loop(timeout=0.02, count=1)
             kb.process()
             if args.no_ros:
                 ros.step()

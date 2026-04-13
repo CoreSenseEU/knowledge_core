@@ -12,12 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-
-from ament_index_python import get_package_share_directory
-
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition, UnlessCondition
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
+from launch.actions import IncludeLaunchDescription
+from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
+from launch.substitutions import PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
@@ -25,6 +28,28 @@ def generate_launch_description():
     pkg = 'knowledge_core'
 
     ld = LaunchDescription()
+
+    namespace_arg = DeclareLaunchArgument(
+        'namespace',
+        default_value='',
+        description='Robot namespace to prepend before /kb (e.g. drone0 → /drone0/kb)')
+    ld.add_action(namespace_arg)
+
+    no_socket_arg = DeclareLaunchArgument(
+        'no_socket',
+        default_value='true',
+        description='Disable the socket server mode')
+    ld.add_action(no_socket_arg)
+
+    viewer_arg = DeclareLaunchArgument(
+        'viewer',
+        default_value='false',
+        description='Launch the knowledge_viewer web UI and rosbridge (default: false)')
+    ld.add_action(viewer_arg)
+
+    namespace = PythonExpression(
+        ["'", LaunchConfiguration('namespace'), "/kb' if '",
+         LaunchConfiguration('namespace'), "' else 'kb'"])
 
     try:
         from launch_pal import get_pal_configuration
@@ -35,19 +60,40 @@ def generate_launch_description():
     except ImportError:
         config = {"parameters": None, "remappings": None, "arguments": None}
 
-    knowledge_core_node = Node(
+    base_args = []
+    if config["arguments"]:
+        base_args += config["arguments"]
+
+    no_socket_args = base_args + ['--no-socket']
+    socket_args = base_args
+
+    knowledge_core_no_socket = Node(
         package='knowledge_core',
         executable='knowledge_core',
-        namespace='kb',
+        namespace=namespace,
         name='knowledge_core',
         parameters=config["parameters"],
         remappings=config["remappings"],
-        arguments=config["arguments"],
+        arguments=no_socket_args,
         output='both',
         emulate_tty=True,
+        condition=IfCondition(LaunchConfiguration('no_socket')),
     )
+    ld.add_action(knowledge_core_no_socket)
 
-    ld.add_action(knowledge_core_node)
+    knowledge_core_socket = Node(
+        package='knowledge_core',
+        executable='knowledge_core',
+        namespace=namespace,
+        name='knowledge_core',
+        parameters=config["parameters"],
+        remappings=config["remappings"],
+        arguments=socket_args,
+        output='both',
+        emulate_tty=True,
+        condition=UnlessCondition(LaunchConfiguration('no_socket')),
+    )
+    ld.add_action(knowledge_core_socket)
 
     try:
         from launch_pal import get_pal_configuration
@@ -58,29 +104,52 @@ def generate_launch_description():
     except ImportError:
         config = {"parameters": None, "remappings": None, "arguments": None}
 
+    drone_digits = PythonExpression(
+        ["''.join(filter(str.isdigit, '", LaunchConfiguration('namespace'), "')) or '0'"])
+
+    viewer_port = PythonExpression(
+        ["str(8010 + int(''.join(filter(str.isdigit, '", LaunchConfiguration('namespace'), "')) or '0'))"])
+
+    rosbridge_port = PythonExpression(
+        ["str(9090 + int(''.join(filter(str.isdigit, '", LaunchConfiguration('namespace'), "')) or '0'))"])
+
+    try:
+        FindPackageShare('rosbridge_server').perform(None)
+        rosbridge_launch = IncludeLaunchDescription(
+            XMLLaunchDescriptionSource([
+                PathJoinSubstitution([
+                    FindPackageShare('rosbridge_server'),
+                    'launch',
+                    'rosbridge_websocket_launch.xml'])
+            ]),
+            launch_arguments={'port': rosbridge_port}.items(),
+            condition=IfCondition(LaunchConfiguration('viewer')),
+        )
+        ld.add_action(rosbridge_launch)
+    except Exception:
+        import logging
+        logging.getLogger('launch').warning(
+            'rosbridge_server not found — knowledge_viewer web UI will not be available. '
+            'Install it with: sudo apt install ros-humble-rosbridge-server'
+        )
+
+    viewer_args = ['--port', viewer_port, '--rosbridge-port', rosbridge_port]
+    if config["arguments"]:
+        viewer_args += config["arguments"]
+
     knowledge_viewer_node = Node(
         package='knowledge_core',
         executable='knowledge_viewer',
-        namespace='kb',
+        namespace=namespace,
         name='knowledge_viewer',
         parameters=config["parameters"],
         remappings=config["remappings"],
-        arguments=config["arguments"],
+        arguments=viewer_args,
         output='both',
         emulate_tty=True,
+        condition=IfCondition(LaunchConfiguration('viewer')),
     )
 
     ld.add_action(knowledge_viewer_node)
-
-    knowledge_core_analyzer = Node(
-        package='diagnostic_aggregator',
-        executable='add_analyzer',
-        namespace=pkg,
-        output='screen',
-        emulate_tty=True,
-        parameters=[
-            os.path.join(get_package_share_directory(pkg), 'config', f'{pkg}_analyzers.yaml')],
-    )
-    ld.add_action(knowledge_core_analyzer)
 
     return ld

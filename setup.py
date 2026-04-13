@@ -20,8 +20,12 @@ def generate_kb_explorer_files():
 
 
 def readme():
-    with open("README-pypi.rst") as f:
-        return f.read()
+    here = os.path.dirname(os.path.abspath(__file__))
+    rst = os.path.join(here, "README-pypi.rst")
+    if os.path.exists(rst):
+        with open(rst) as f:
+            return f.read()
+    return ""
 
 
 setup(

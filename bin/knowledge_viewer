@@ -1,5 +1,6 @@
 #! /usr/env python3
 
+import argparse
 import http.server
 import socketserver
 import os
@@ -17,15 +18,46 @@ def get_package_path(package_name):
 
 
 if __name__ == "__main__":
+    import sys
+
+    # Strip ROS remapping args before parsing
+    argv = sys.argv[1:sys.argv.index("--ros-args")] \
+        if "--ros-args" in sys.argv else sys.argv[1:]
+
+    parser = argparse.ArgumentParser(description="KnowledgeCore web viewer")
+    parser.add_argument(
+        "-p", "--port",
+        default=8010,
+        type=int,
+        help="HTTP port for the web viewer (default: 8010)"
+    )
+    parser.add_argument(
+        "--rosbridge-port",
+        default=9090,
+        type=int,
+        help="Rosbridge websocket port the viewer page should connect to (default: 9090)"
+    )
+    args = parser.parse_args(argv)
+
     PACKAGE_NAME = "knowledge_core"
     package_path = get_package_path(PACKAGE_NAME)
 
     if package_path:
         os.chdir(package_path + "/pages")  # Change to package directory
-        PORT = 8010  # Define the HTTP server port
+        PORT = args.port
+        ROSBRIDGE_PORT = args.rosbridge_port
 
-        Handler = http.server.SimpleHTTPRequestHandler
-        with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        class RedirectHandler(http.server.SimpleHTTPRequestHandler):
+            def do_GET(self):
+                # Redirect bare root requests to include the rosbridge_port query param
+                if self.path in ('/', '/index.html'):
+                    self.send_response(302)
+                    self.send_header('Location', f'/index.html?rosbridge_port={ROSBRIDGE_PORT}')
+                    self.end_headers()
+                else:
+                    super().do_GET()
+
+        with socketserver.TCPServer(("", PORT), RedirectHandler) as httpd:
             print(
                 f"knowledge_viewer is running. Open http://localhost:{PORT} in a webbrowser to start exploring the knowledge base.")
             httpd.serve_forever()
