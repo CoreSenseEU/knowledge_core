@@ -21,6 +21,9 @@ from knowledge_core.exceptions import KbServerError
 from kb_msgs.srv import Manage, Revise, Query, About, Lookup, Sparql, Event
 from kb_msgs.msg import ActiveConcepts
 from std_msgs.msg import String
+from as2_msgs.srv import RegisterModule
+from as2_msgs.msg import LocalGenericMessage
+from rclpy.serialization import deserialize_message, serialize_message
 
 EVENTS_TOPIC_NS = "events/"
 
@@ -132,6 +135,19 @@ class KnowledgeCoreROS(Node):
         self.create_service(Lookup, "lookup",  self.handle_lookup)
         self.create_service(Event, "events",  self.handle_new_event)
         self.create_service(Sparql, "sparql",  self.handle_sparql)
+
+        # Register with ca_gateway. The gateway lives one namespace level above
+        # (e.g. /drone0 when this node is at /drone0/kb).
+        ns = self.get_namespace()  # e.g. "/drone0/kb" or "/kb"
+        parent_ns = ns.rsplit('/', 1)[0]  # "/drone0" or ""
+        register_service = parent_ns + '/register_module'
+        self._gateway_out_topic = parent_ns + '/gateway_out'
+        self._register_client = self.create_client(RegisterModule, register_service)
+        self._gateway_out_pub = self.create_publisher(
+            LocalGenericMessage, self._gateway_out_topic, 10)
+        self._local_query_client = self.create_client(Query, 'query')
+        # Retry every second until the gateway is available
+        self._register_timer = self.create_timer(1.0, self._register_with_gateway)
 
         self.get_logger().info(
             """
@@ -413,6 +429,62 @@ Available services:
                 f"Unable to create event! Original error was: {str(kbe)}")
             response.id = ""
             return response
+
+    def _register_with_gateway(self):
+        if not self._register_client.service_is_ready():
+            return
+
+        self._register_timer.cancel()
+
+        req = RegisterModule.Request()
+        req.type = 'Query.Request'
+        req.module_name = 'knowledge_core'
+        future = self._register_client.call_async(req)
+        future.add_done_callback(self._on_gateway_register_response)
+
+    def _on_gateway_register_response(self, future):
+        try:
+            response = future.result()
+            if response.topic:
+                self.get_logger().info(
+                    f"Registered with ca_gateway for type 'Query.Request' on topic: {response.topic}")
+                self._query_sub = self.create_subscription(
+                    LocalGenericMessage, response.topic,
+                    self._on_inter_agent_query, 10)
+            else:
+                self.get_logger().warn("ca_gateway registration returned an empty topic")
+        except Exception as e:
+            self.get_logger().error(f"ca_gateway registration failed: {e}")
+
+    def _on_inter_agent_query(self, msg):
+        sender = msg.agents[0] if msg.agents else ''
+        try:
+            req = deserialize_message(bytes(msg.data), Query.Request)
+        except Exception as e:
+            self.get_logger().error(
+                f"Failed to deserialize inter-agent query from '{sender}': {e}")
+            return
+
+        future = self._local_query_client.call_async(req)
+        future.add_done_callback(lambda f: self._on_query_response(f, sender))
+
+    def _on_query_response(self, future, sender):
+        try:
+            response = future.result()
+        except Exception as e:
+            self.get_logger().error(
+                f"Local query service call failed for sender '{sender}': {e}")
+            return
+
+        reply = LocalGenericMessage()
+        reply.agents = [sender]
+        reply.type = 'Query.Response'
+        reply.data = list(serialize_message(response))
+        self._gateway_out_pub.publish(reply)
+
+        self.get_logger().info(
+            f"Answered inter-agent query from '{sender}': success={response.success}"
+        )
 
     def step(self):
         now = self.get_clock().now()

@@ -172,7 +172,7 @@ def main():
     # The logging handlers are now setup, import the other knowledge_core components
     from knowledge_core.kb import KnowledgeCore, KbServerError
 
-    kb = KnowledgeCore(args.ontology, enable_reasoner=args.no_reasoner)
+    kb = KnowledgeCore(args.ontology, enable_reasoner=args.no_reasoner, auto_activeconcepts=True)
 
     if not args.no_socket:
         s = KnowledgeCoreServer(args.port, kb)
