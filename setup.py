@@ -60,5 +60,11 @@ setup(
     maintainer_email='severin.lemaignan@pal-robotics.com',
     url='https://github.com/severin-lemaignan/knowledge_core',
     tests_require=['pytest'],
-    scripts=['bin/knowledge_core', 'bin/knowledge_viewer', 'bin/kb_text_viewer', 'bin/kb_tui'],
+    scripts=['bin/knowledge_core', 'bin/knowledge_viewer'],
+    entry_points={
+        'console_scripts': [
+            'kb_text_viewer = kb_viewer.kb_text_viewer:main',
+            'kb_tui = kb_viewer.kb_tui:main',
+        ],
+    },
 )
