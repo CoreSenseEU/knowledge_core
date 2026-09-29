@@ -4,6 +4,8 @@
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -24,6 +26,11 @@ try:
 except ImportError:
     print("textual is not installed. Run: pip install textual")
     sys.exit(1)
+
+try:
+    import pyperclip
+except ImportError:
+    pyperclip = None
 
 
 # ── Background ROS fetcher ────────────────────────────────────────────────────
@@ -205,7 +212,11 @@ class KBApp(App):
 
     TITLE = "KnowledgeCore TUI"
     CSS = CSS
-    BINDINGS = [("q", "quit", "Quit"), ("ctrl+c", "quit", "Quit")]
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("ctrl+c", "quit", "Quit"),
+        ("c", "copy_facts", "Copy facts"),
+    ]
 
     def __init__(self, fetcher: KBFetcher, **kwargs):
         super().__init__(**kwargs)
@@ -327,9 +338,11 @@ class KBApp(App):
         old_rows = [table.get_row_at(i) for i in range(table.row_count)]
 
         if new_rows != old_rows:
+            scroll_y = table.scroll_y
             table.clear()
             for row in new_rows:
                 table.add_row(*row)
+            table.scroll_to(y=scroll_y, animate=False)
 
         total = len(triples)
         shown = len(visible)
@@ -337,6 +350,90 @@ class KBApp(App):
         base = f"Showing {shown} of {total} facts" if filt else f"{total} facts"
         filt_part = f"  |  filter: '{filt}'" if filt else ""
         status_label.update(f"{base}{filt_part}  |  sort: {sort_indicator}  |  ns: {self._fetcher.get_namespace()}")
+
+    # ── Copy facts ────────────────────────────────────────────────────────────
+
+    def action_copy_facts(self) -> None:
+        """Copy all visible facts in the active tab to the clipboard."""
+        table = self.query_one("#facts-table", DataTable)
+        status_label = self.query_one("#status", Label)
+
+        if table.row_count == 0:
+            status_label.update("[yellow]No facts to copy[/yellow]")
+            return
+
+        # Gather rows with column headers
+        header_row = "\t".join([col[0] for col in _COLUMNS])
+        rows = []
+        for i in range(table.row_count):
+            row_data = table.get_row_at(i)
+            rows.append("\t".join(str(cell) for cell in row_data))
+
+        content = header_row + "\n" + "\n".join(rows)
+
+        # Try multiple methods to copy to clipboard
+        result = self._copy_to_clipboard(content)
+        if result[0] == "clipboard":
+            status_label.update(f"[green]Copied {table.row_count} fact(s) to clipboard[/green]")
+        elif result[0] == "file":
+            status_label.update(f"[yellow]Saved {table.row_count} fact(s) to: {result[1]}[/yellow]")
+        else:
+            status_label.update("[red]Failed to copy facts[/red]")
+
+    def _copy_to_clipboard(self, content: str) -> tuple:
+        """Try multiple methods to copy content to clipboard.
+
+        Returns: (method, path_or_none) where method is "clipboard", "file", or "failed"
+        """
+        # Method 1: Try pyperclip
+        if pyperclip:
+            try:
+                pyperclip.copy(content)
+                return ("clipboard", None)
+            except Exception as e:
+                pass
+
+        # Method 2: Try xclip (Linux) - only if DISPLAY is set
+        if os.environ.get("DISPLAY"):
+            try:
+                proc = subprocess.Popen(
+                    ["xclip", "-selection", "clipboard"],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                proc.communicate(content.encode("utf-8"), timeout=2)
+                if proc.returncode == 0:
+                    return ("clipboard", None)
+            except Exception:
+                pass
+
+        # Method 3: Try xsel (Linux) - only if DISPLAY is set
+        if os.environ.get("DISPLAY"):
+            try:
+                proc = subprocess.Popen(
+                    ["xsel", "--clipboard", "--input"],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                proc.communicate(content.encode("utf-8"), timeout=2)
+                if proc.returncode == 0:
+                    return ("clipboard", None)
+            except Exception:
+                pass
+
+        # Fallback: Write to a temp file
+        try:
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".tsv", delete=False) as f:
+                f.write(content)
+                temp_path = f.name
+            return ("file", temp_path)
+        except Exception:
+            pass
+
+        return ("failed", None)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

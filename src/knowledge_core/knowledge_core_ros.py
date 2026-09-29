@@ -82,7 +82,7 @@ class KnowledgeCoreROS(Node):
 
             try:
                 ontologies_res = aip.get_resource(RES_NAME, pkg)
-            except aip.LookupError:
+            except LookupError:
                 self.get_logger().error(
                     f"Default ontology (default_kb) set to {default_kb.value}, "
                     f"yet package '{pkg}' not found in the '{RES_NAME}' resource index")
@@ -178,12 +178,17 @@ Available services:
         )
 
     def on_update_fact(self, msg):
+        # A single message may carry several newline-separated triples
+        # (see KBInterface::add_facts) so that a bulk write only triggers
+        # one reasoner materialisation pass instead of one per triple.
+        stmts = msg.data.split("\n")
         try:
-            self.kb.update([msg.data])
+            self.kb.update(stmts)
         except KbServerError as kse:
             self.get_logger().error(str(kse))
-        if msg.data not in self.last_facts:
-            self.last_facts.append(msg.data)
+        for stmt in stmts:
+            if stmt not in self.last_facts:
+                self.last_facts.append(stmt)
 
     def on_retract_fact(self, msg):
         try:
@@ -437,7 +442,7 @@ Available services:
         self._register_timer.cancel()
 
         req = RegisterModule.Request()
-        req.type = 'Query.Request'
+        req.type = 'Query_Request'
         req.module_name = 'knowledge_core'
         future = self._register_client.call_async(req)
         future.add_done_callback(self._on_gateway_register_response)
@@ -447,7 +452,7 @@ Available services:
             response = future.result()
             if response.topic:
                 self.get_logger().info(
-                    f"Registered with ca_gateway for type 'Query.Request' on topic: {response.topic}")
+                    f"Registered with ca_gateway for type 'Query_Request' on topic: {response.topic}")
                 self._query_sub = self.create_subscription(
                     LocalGenericMessage, response.topic,
                     self._on_inter_agent_query, 10)
@@ -487,6 +492,9 @@ Available services:
         )
 
     def step(self):
+        if not hasattr(self, 'last_diagnostics_ts'):
+            return
+
         now = self.get_clock().now()
 
         if (now - self.last_diagnostics_ts).nanoseconds > 1e9 / DIAGNOSTICS_FREQUENCY:

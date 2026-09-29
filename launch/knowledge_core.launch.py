@@ -58,7 +58,7 @@ def generate_launch_description():
             node='knowledge_core',
             ld=ld)
     except ImportError:
-        config = {"parameters": None, "remappings": None, "arguments": None}
+        config = {"parameters": [], "remappings": [], "arguments": []}
 
     base_args = []
     if config["arguments"]:
@@ -102,7 +102,7 @@ def generate_launch_description():
             node='knowledge_viewer',
             ld=ld)
     except ImportError:
-        config = {"parameters": None, "remappings": None, "arguments": None}
+        config = {"parameters": [], "remappings": [], "arguments": []}
 
     drone_digits = PythonExpression(
         ["''.join(filter(str.isdigit, '", LaunchConfiguration('namespace'), "')) or '0'"])

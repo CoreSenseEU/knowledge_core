@@ -1008,8 +1008,10 @@ class KnowledgeCore:
                 # final list of statments to remove
                 new_stmts = []
                 for e in res:
+                    # Use the shortened value directly as the object - it will be
+                    # properly expanded by parse_stmts_to_graph since it uses N3_PROLOGUE
                     new_stmts.append(" ".join([str(e[tok_order[0]]), str(
-                        e[tok_order[1]]), parse_term(e[tok_order[2]]).n3()]))
+                        e[tok_order[1]]), str(e[tok_order[2]])]))
 
                 subgraph = parse_stmts_to_graph(new_stmts)
                 parsed_stmts = "\n\t- ".join(
