@@ -18,7 +18,7 @@ import json
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from knowledge_core.exceptions import KbServerError
 
-from kb_msgs.srv import Manage, Revise, Query, About, Lookup, Sparql, Event
+from kb_msgs.srv import Manage, Revise, Query, About, Lookup, Sparql, RegisterEvent
 from kb_msgs.msg import ActiveConcepts
 from std_msgs.msg import String
 from as2_msgs.srv import RegisterModule
@@ -133,7 +133,7 @@ class KnowledgeCoreROS(Node):
         self.create_service(About, "label",  self.handle_details)
         self.create_service(About, "details",  self.handle_details)
         self.create_service(Lookup, "lookup",  self.handle_lookup)
-        self.create_service(Event, "events",  self.handle_new_event)
+        self.create_service(RegisterEvent, "events",  self.handle_new_event)
         self.create_service(Sparql, "sparql",  self.handle_sparql)
 
         # Register with ca_gateway. The gateway lives one namespace level above
@@ -172,7 +172,7 @@ Available services:
 - /kb/details [kb_msgs/About]
 - /kb/lookup [kb_msgs/Lookup]
 - /kb/sparql [kb_msgs/Sparql]
-- /kb/events [kb_msgs/Event]
+- /kb/events [kb_msgs/RegisterEvent]
 
 """
         )
